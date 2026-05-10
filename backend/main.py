@@ -4,13 +4,12 @@ from dotenv import load_dotenv
 import requests
 import os
 
-from openrouter import OpenRouter
-
 from schemas import OpenRouterModel, OpenRouterModelList, EvaluateModelRequest, EvaluateModelResponse, TokenBreakdown, EvalMode
 
 load_dotenv("../.env.local")
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_RESPONSES_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 app = FastAPI()
@@ -26,6 +25,9 @@ def fetch_openrouter_models() -> OpenRouterModelList:
         model_output = OpenRouterModelList(models=[])
         data = response.json().get("data")
         for model in data:
+            model_id: str = model.get("id")
+            if model_id.startswith("~"): # then it's an alias
+                continue
             model_output.models.append(OpenRouterModel(id=model.get("id"), label=model.get("name")))
         return model_output
     except requests.exceptions.RequestException as e:
@@ -39,20 +41,39 @@ def get_models() -> OpenRouterModelList:
 
 @app.post("/evaluate")
 def evaluate_model(req: EvaluateModelRequest) -> EvaluateModelResponse:
-    with OpenRouter(
-        api_key=OPENROUTER_API_KEY
-    ) as client:
-        response = client.chat.send(
-            model=req.model_id,
-            messages=[
-                {"role": "system", "content": req.system_prompt},
-                {"role": "user", "content": req.user_input}
-            ]
-        )
-        response_content = str(response.choices[0].message.content)
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": req.system_prompt
+            },
+            {
+                "role": "user",
+                "content": req.user_input
+            }
+        ],
+        "model": req.model_id
+    }
+
+    headers = {
+        "X-OpenRouter-Experimental-Metadata": "enabled",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(OPENROUTER_RESPONSES_URL, json=payload, headers=headers)
+    data = response.json()
+
+    message = data["choices"][0]["message"]["content"]
+    usage = data["usage"]
+
     return EvaluateModelResponse(
-        response=response_content,
+        response=message,
         passed=True,
-        tokens=TokenBreakdown(prompt=0,completion=1,total=1),
-        eval_mode=req.eval_mode
+        tokens=TokenBreakdown(
+            prompt=usage["prompt_tokens"],
+            completion=usage["completion_tokens"],
+            total=usage["total_tokens"],
+        ),
+        eval_mode=req.eval_mode,
     )
