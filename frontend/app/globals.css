@@ -97,3 +97,34 @@ select.field { appearance: none; cursor: pointer; padding-right: 1.25rem; }
 
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .fade { animation: fade 280ms ease-out both; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  font-size: 12px;
+  background: transparent;
+}
+.chip button {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+}
+.chip button:hover { color: var(--accent); }
+
+.add-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.add-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ink); }
+.add-btn:disabled { opacity: 0.4; cursor: not-allowed; }

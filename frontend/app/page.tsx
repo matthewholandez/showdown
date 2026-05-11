@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Model = { id: string; label: string };
 type EvalMode = "contains" | "exact" | "regex";
@@ -12,18 +12,23 @@ type EvalResponse = {
   eval_mode: EvalMode;
 };
 
+type CardState =
+  | { state: "loading" }
+  | { state: "done"; data: EvalResponse }
+  | { state: "error"; error: string };
+
 const MODES: EvalMode[] = ["contains", "exact", "regex"];
 
 export default function Home() {
   const [models, setModels] = useState<Model[]>([]);
-  const [modelId, setModelId] = useState("");
+  const [pendingId, setPendingId] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [systemPrompt, setSystemPrompt] = useState("You are a terse oracle. Answer in one short sentence.");
   const [userInput, setUserInput] = useState("What is the capital of France?");
   const [expected, setExpected] = useState("Paris");
   const [mode, setMode] = useState<EvalMode>("contains");
-  const [loading, setLoading] = useState(false);
   const [hasRun, setHasRun] = useState(false);
-  const [result, setResult] = useState<EvalResponse | null>(null);
+  const [results, setResults] = useState<Record<string, CardState>>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,33 +39,56 @@ export default function Home() {
           a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
         );
         setModels(sorted);
-        if (sorted[0]) setModelId(sorted[0].id);
+        if (sorted[0]) setPendingId(sorted[0].id);
       })
       .catch(() => setError("couldn't reach the backend"));
   }, []);
 
-  const selected = useMemo(() => models.find((m) => m.id === modelId), [models, modelId]);
+  const anyLoading = Object.values(results).some((r) => r.state === "loading");
+
+  function addModel() {
+    if (!pendingId || selectedIds.includes(pendingId)) return;
+    setSelectedIds((prev) => [...prev, pendingId]);
+  }
+
+  function removeModel(id: string) {
+    setSelectedIds((prev) => prev.filter((m) => m !== id));
+    setResults((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
 
   async function run(e: React.FormEvent) {
     e.preventDefault();
-    if (!modelId) return;
-    setLoading(true);
+    if (selectedIds.length === 0) return;
     setHasRun(true);
-    setResult(null);
     setError(null);
-    try {
-      const res = await fetch("/api/evaluate", {
+    setResults(Object.fromEntries(selectedIds.map((id) => [id, { state: "loading" } as CardState])));
+
+    selectedIds.forEach((id) => {
+      fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ systemPrompt, userInput, expected, modelId, evalMode: mode }),
-      });
-      if (!res.ok) throw new Error(`http ${res.status}`);
-      setResult(await res.json());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "unknown error");
-    } finally {
-      setLoading(false);
-    }
+        body: JSON.stringify({ systemPrompt, userInput, expected, modelId: id, evalMode: mode }),
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`http ${res.status}`);
+          const data: EvalResponse = await res.json();
+          setResults((prev) => ({ ...prev, [id]: { state: "done", data } }));
+        })
+        .catch((err) => {
+          setResults((prev) => ({
+            ...prev,
+            [id]: { state: "error", error: err instanceof Error ? err.message : "unknown error" },
+          }));
+        });
+    });
+  }
+
+  function labelFor(id: string) {
+    return models.find((m) => m.id === id)?.label ?? id;
   }
 
   return (
@@ -77,20 +105,39 @@ export default function Home() {
       <div className={`grid gap-12 ${hasRun ? "md:grid-cols-2" : "grid-cols-1"}`}>
         <form onSubmit={run} className="space-y-7" suppressHydrationWarning>
           <div>
-            <div className="label mb-1">model</div>
-            <select
-              className="field"
-              value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
-              disabled={!models.length}
-              suppressHydrationWarning
-            >
-              {!models.length && <option>loading…</option>}
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
-            {selected && <div className="text-muted text-[11px] mt-1 truncate">{selected.id}</div>}
+            <div className="label mb-1">models</div>
+            <div className="flex items-center gap-2">
+              <select
+                className="field flex-1"
+                value={pendingId}
+                onChange={(e) => setPendingId(e.target.value)}
+                disabled={!models.length}
+                suppressHydrationWarning
+              >
+                {!models.length && <option>loading…</option>}
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="add-btn"
+                onClick={addModel}
+                disabled={!pendingId || selectedIds.includes(pendingId)}
+              >
+                add
+              </button>
+            </div>
+            {selectedIds.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {selectedIds.map((id) => (
+                  <span key={id} className="chip">
+                    {labelFor(id)}
+                    <button type="button" onClick={() => removeModel(id)} aria-label={`remove ${labelFor(id)}`}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>
@@ -138,42 +185,53 @@ export default function Home() {
           </div>
 
           <div className="flex items-center justify-between pt-2">
-            <button type="submit" className="submit" disabled={loading || !modelId} suppressHydrationWarning>
-              {loading ? "running…" : "run"}
+            <button
+              type="submit"
+              className="submit"
+              disabled={anyLoading || selectedIds.length === 0}
+              suppressHydrationWarning
+            >
+              {anyLoading ? "running…" : "run"}
             </button>
             {error && <span className="text-accent text-xs">{error}</span>}
           </div>
         </form>
 
         {hasRun && (
-          <aside className="fade md:sticky md:top-16 md:self-start">
-            <div className="label mb-3">result</div>
-            {loading && (
-              <div className="text-muted italic font-serif text-lg">running…</div>
-            )}
-            {!loading && error && (
-              <div className="text-accent text-sm">{error}</div>
-            )}
-            {!loading && result && (
-              <>
-                <div className="flex items-center gap-2 mb-4">
-                  <span
-                    className="dot"
-                    style={{ background: result.passed ? "var(--ink)" : "var(--accent)" }}
-                  />
-                  <span className="font-serif italic text-xl">
-                    {result.passed ? "passed" : "failed"}
-                  </span>
-                  <span className="text-muted text-xs ml-auto">
-                    {result.eval_mode} · {result.tokens.total} tokens
-                    <span className="text-muted/70"> ({result.tokens.prompt}+{result.tokens.completion})</span>
-                  </span>
+          <aside className="md:sticky md:top-16 md:self-start space-y-6">
+            <div className="label">results</div>
+            {selectedIds.map((id) => {
+              const r = results[id];
+              return (
+                <div key={id} className="fade border-b border-line pb-5 last:border-0">
+                  <div className="text-muted text-[11px] mb-2 truncate">{labelFor(id)}</div>
+                  {!r || r.state === "loading" ? (
+                    <div className="text-muted italic font-serif">running…</div>
+                  ) : r.state === "error" ? (
+                    <div className="text-accent text-sm">{r.error}</div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span
+                          className="dot"
+                          style={{ background: r.data.passed ? "var(--ink)" : "var(--accent)" }}
+                        />
+                        <span className="font-serif italic text-lg">
+                          {r.data.passed ? "passed" : "failed"}
+                        </span>
+                        <span className="text-muted text-xs ml-auto">
+                          {r.data.eval_mode} · {r.data.tokens.total} tokens
+                          <span className="text-muted/70"> ({r.data.tokens.prompt}+{r.data.tokens.completion})</span>
+                        </span>
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
+{r.data.response}
+                      </pre>
+                    </>
+                  )}
                 </div>
-                <pre className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
-{result.response}
-                </pre>
-              </>
-            )}
+              );
+            })}
           </aside>
         )}
       </div>

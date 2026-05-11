@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from functools import lru_cache
 from dotenv import load_dotenv
-import requests
+import httpx
 import os
 import re
 
@@ -22,7 +22,7 @@ def fetch_openrouter_models() -> OpenRouterModelList:
         "Authorization": f"Bearer {OPENROUTER_API_KEY}"
     }
     try:
-        response: requests.Response = requests.get(OPENROUTER_MODELS_URL, headers=headers)
+        response = httpx.get(OPENROUTER_MODELS_URL, headers=headers, timeout=30.0)
         model_output = OpenRouterModelList(models=[])
         data = response.json().get("data")
         for model in data:
@@ -31,7 +31,7 @@ def fetch_openrouter_models() -> OpenRouterModelList:
                 continue
             model_output.models.append(OpenRouterModel(id=model.get("id"), label=model.get("name")))
         return model_output
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         raise SystemExit(e)
 
 @app.get("/models")
@@ -54,7 +54,7 @@ def check_eval(response: str, expected: str, mode: EvalMode) -> bool:
 
 
 @app.post("/evaluate")
-def evaluate_model(req: EvaluateModelRequest) -> EvaluateModelResponse:
+async def evaluate_model(req: EvaluateModelRequest) -> EvaluateModelResponse:
     payload = {
         "messages": [
             {
@@ -75,7 +75,8 @@ def evaluate_model(req: EvaluateModelRequest) -> EvaluateModelResponse:
         "Content-Type": "application/json"
     }
 
-    response = requests.post(OPENROUTER_RESPONSES_URL, json=payload, headers=headers)
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(OPENROUTER_RESPONSES_URL, json=payload, headers=headers)
     data = response.json()
 
     message = data["choices"][0]["message"]["content"]
