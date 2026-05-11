@@ -60,14 +60,17 @@ export default function Home() {
     });
   }
 
-  async function run(e: React.FormEvent) {
-    e.preventDefault();
-    if (selectedIds.length === 0) return;
+  function fireFor(ids: string[]) {
+    if (ids.length === 0) return;
     setHasRun(true);
     setError(null);
-    setResults(Object.fromEntries(selectedIds.map((id) => [id, { state: "loading" } as CardState])));
+    setResults((prev) => {
+      const next = { ...prev };
+      for (const id of ids) next[id] = { state: "loading" };
+      return next;
+    });
 
-    selectedIds.forEach((id) => {
+    ids.forEach((id) => {
       fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,6 +89,15 @@ export default function Home() {
         });
     });
   }
+
+  async function run(e: React.FormEvent) {
+    e.preventDefault();
+    fireFor(selectedIds);
+  }
+
+  const untestedIds = selectedIds.filter(
+    (id) => !results[id] || results[id].state === "error"
+  );
 
   function labelFor(id: string) {
     return models.find((m) => m.id === id)?.label ?? id;
@@ -185,14 +197,26 @@ export default function Home() {
           </div>
 
           <div className="flex items-center justify-between pt-2">
-            <button
-              type="submit"
-              className="submit"
-              disabled={anyLoading || selectedIds.length === 0}
-              suppressHydrationWarning
-            >
-              {anyLoading ? "running…" : "run"}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                className="submit"
+                disabled={anyLoading || selectedIds.length === 0}
+                suppressHydrationWarning
+              >
+                {anyLoading ? "running…" : hasRun ? "run all" : "run"}
+              </button>
+              {hasRun && untestedIds.length > 0 && (
+                <button
+                  type="button"
+                  className="add-btn"
+                  onClick={() => fireFor(untestedIds)}
+                  disabled={anyLoading}
+                >
+                  run untested ({untestedIds.length})
+                </button>
+              )}
+            </div>
             {error && <span className="text-accent text-xs">{error}</span>}
           </div>
         </form>
@@ -205,7 +229,9 @@ export default function Home() {
               return (
                 <div key={id} className="fade border-b border-line pb-5 last:border-0">
                   <div className="text-muted text-[11px] mb-2 truncate">{labelFor(id)}</div>
-                  {!r || r.state === "loading" ? (
+                  {!r ? (
+                    <div className="text-muted italic font-serif">not run</div>
+                  ) : r.state === "loading" ? (
                     <div className="text-muted italic font-serif">running…</div>
                   ) : r.state === "error" ? (
                     <div className="text-accent text-sm">{r.error}</div>
