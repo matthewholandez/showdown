@@ -3,6 +3,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 import requests
 import os
+import re
 
 from schemas import OpenRouterModel, OpenRouterModelList, EvaluateModelRequest, EvaluateModelResponse, TokenBreakdown, EvalMode
 
@@ -39,6 +40,19 @@ def get_models() -> OpenRouterModelList:
     return models
 
 
+def check_eval(response: str, expected: str, mode: EvalMode) -> bool:
+    if mode == EvalMode.CONTAINS:
+        return expected in response
+    if mode == EvalMode.EXACT:
+        return response.strip() == expected.strip()
+    if mode == EvalMode.REGEX:
+        try:
+            return re.search(expected, response) is not None
+        except re.error:
+            return False
+    return False
+
+
 @app.post("/evaluate")
 def evaluate_model(req: EvaluateModelRequest) -> EvaluateModelResponse:
     payload = {
@@ -69,7 +83,7 @@ def evaluate_model(req: EvaluateModelRequest) -> EvaluateModelResponse:
 
     return EvaluateModelResponse(
         response=message,
-        passed=True,
+        passed=check_eval(message, req.expected, req.eval_mode),
         tokens=TokenBreakdown(
             prompt=usage["prompt_tokens"],
             completion=usage["completion_tokens"],

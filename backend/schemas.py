@@ -25,7 +25,7 @@ class EvaluateModelRequest(BaseModel):
     )]
     expected: Annotated[str, Field(
         description="The expected value when the input passes through the model",
-        alias="userInput"
+        alias="expected"
     )]
     model_id: Annotated[str, Field(
         description="The id of the model to test",
