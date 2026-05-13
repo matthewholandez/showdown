@@ -4,6 +4,8 @@
 <!-- <p>Demo | Writeup</p> -->
 </div>
 
+![mockup of Showdown](public/demo.png)
+
 ## The idea
 
 Ever change a line in your system prompt and suddenly everything breaks?
